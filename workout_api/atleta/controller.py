@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 from fastapi import APIRouter, Body, HTTPException, status
 from pydantic import UUID4
-
+from sqlalchemy.exc import IntegrityError
 from workout_api.atleta.schemas import AtletaIn, AtletaOut, AtletaUpdate
 from workout_api.atleta.models import AtletaModel
 from workout_api.categorias.models import CategoriaModel
@@ -54,6 +54,12 @@ async def post(
         
         db_session.add(atleta_model)
         await db_session.commit()
+    except IntegrityError:
+        await db_session.rollback()
+        raise HTTPException(
+            status_code=303,
+            detail=f"Já existe um atleta cadastrado com o cpf: {atleta_in.cpf}"
+        )    
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
@@ -67,22 +73,40 @@ async def post(
     '/', 
     summary='Consultar todos os Atletas',
     status_code=status.HTTP_200_OK,
-    response_model=list[AtletaOut],
 )
 async def query(
     db_session: DatabaseDependency,
     nome: str = Query(None, description="Filtrar por nome do atleta"),
-    cpf: str = Query(None, description="Filtrar por CPF do atleta")
-) -> list[AtletaOut]:
+    cpf: str = Query(None, description="Filtrar por CPF do atleta"),
+    fields: str = Query(
+        None,
+        description="Campos para retornar. Ex: 'nome, categoria, etc'"
+    )
+):
     query_stmt = select(AtletaModel)
     if nome:
         query_stmt = query_stmt.filter(AtletaModel.nome == nome)
     if cpf:
         query_stmt = query_stmt.filter(AtletaModel.cpf == cpf)
 
-    atletas: list[AtletaOut] = (await db_session.execute(query_stmt)).scalars().all()
+    atletas = (await db_session.execute(query_stmt)).scalars().all()
+
     
-    return [AtletaOut.model_validate(atleta) for atleta in atletas]
+    atletas_out = [AtletaOut.model_validate(atleta) for atleta in atletas]
+
+    
+    if fields:
+        campos = {f.strip() for f in fields.split(",")}
+        resposta_custom = []
+        for atleta in atletas_out:
+            atleta_dict = atleta.model_dump()
+            resposta_custom.append({
+                campo: atleta_dict.get(campo)
+                for campo in campos if campo in atleta_dict
+            })
+        return resposta_custom
+
+    return atletas_out
 
 
 @router.get(
