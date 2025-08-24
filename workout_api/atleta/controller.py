@@ -69,8 +69,18 @@ async def post(
     status_code=status.HTTP_200_OK,
     response_model=list[AtletaOut],
 )
-async def query(db_session: DatabaseDependency) -> list[AtletaOut]:
-    atletas: list[AtletaOut] = (await db_session.execute(select(AtletaModel))).scalars().all()
+async def query(
+    db_session: DatabaseDependency,
+    nome: str = Query(None, description="Filtrar por nome do atleta"),
+    cpf: str = Query(None, description="Filtrar por CPF do atleta")
+) -> list[AtletaOut]:
+    query_stmt = select(AtletaModel)
+    if nome:
+        query_stmt = query_stmt.filter(AtletaModel.nome == nome)
+    if cpf:
+        query_stmt = query_stmt.filter(AtletaModel.cpf == cpf)
+
+    atletas: list[AtletaOut] = (await db_session.execute(query_stmt)).scalars().all()
     
     return [AtletaOut.model_validate(atleta) for atleta in atletas]
 
